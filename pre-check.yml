@@ -1,0 +1,29 @@
+---
+- name: Installing atomic-openshift-utils and atomic-openshift-clients
+  hosts: localhost
+  become: true
+  tasks:
+  - name: Install packages
+    yum: pkg={{ item }} state=present
+    with_items:
+      - atomic-openshift-utils
+      - atomic-openshift-clients
+
+- name: Pre-checks for OCP installation
+  hosts: nodes
+  become: true
+  tasks:
+  - name: Pinging the OCP cluster hosts
+    ping:
+  - name: Status of docker service
+    command: "systemctl status docker | grep Active"
+    register: out
+  - debug: var=out   
+  - name: Checking Docker version
+    command: "docker version|grep Version"
+  - name: Checking Repos are configured
+    command: "yum repolist"
+  - name: Checking NFS exportfs
+    command: "exportfs"
+  - name: Starting pre-requsites playbook
+    command: "ansible-playbook -f 20 /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml"
