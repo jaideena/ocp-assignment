@@ -1,0 +1,994 @@
+    1      type: ClusterIP
+    2  - kind: Route
+    3    apiVersion: v1
+    4    id: ${APPLICATION_NAME}-http
+    5    metadata:
+    6      annotations:
+    7        description: Route for applications http service.
+    8      labels:
+    9        app: ${APPLICATION_NAME}
+   10      name: ${APPLICATION_NAME}
+   11    spec:
+   12      host: ${GOGS_ROUTE}
+   13      to:
+   14        name: ${APPLICATION_NAME}
+   15  - kind: DeploymentConfig
+   16    apiVersion: v1
+   17    metadata:
+   18      labels:
+   19        app: ${APPLICATION_NAME}
+   20      name: ${APPLICATION_NAME}
+   21    spec:
+   22      replicas: 1
+   23      selector:
+   24        app: ${APPLICATION_NAME}
+   25        deploymentconfig: ${APPLICATION_NAME}
+   26      strategy:
+   27        rollingParams:
+   28          intervalSeconds: 1
+   29          maxSurge: 25%
+   30          maxUnavailable: 25%
+   31          timeoutSeconds: 600
+   32          updatePeriodSeconds: 1
+   33        type: Rolling
+   34      template:
+   35        metadata:
+   36          labels:
+   37            app: ${APPLICATION_NAME}
+   38            deploymentconfig: ${APPLICATION_NAME}
+   39        spec:
+   40          containers:
+   41          - image: \"\"
+   42            imagePullPolicy: Always
+   43            name: ${APPLICATION_NAME}
+   44            ports:
+   45            - containerPort: 3000
+   46              protocol: TCP
+   47            resources: {}
+   48            terminationMessagePath: /dev/termination-log
+   49            volumeMounts:
+   50            - name: gogs-data
+   51              mountPath: /data
+   52            - name: gogs-config
+   53              mountPath: /opt/gogs/custom/conf
+   54            readinessProbe:
+   55                httpGet:
+   56                  path: /
+   57                  port: 3000
+   58                  scheme: HTTP
+   59                initialDelaySeconds: 3
+   60                timeoutSeconds: 1
+   61                periodSeconds: 20
+   62                successThreshold: 1
+   63                failureThreshold: 3
+   64            livenessProbe:
+   65                httpGet:
+   66                  path: /
+   67                  port: 3000
+   68                  scheme: HTTP
+   69                initialDelaySeconds: 3
+   70                timeoutSeconds: 1
+   71                periodSeconds: 10
+   72                successThreshold: 1
+   73                failureThreshold: 3
+   74          dnsPolicy: ClusterFirst
+   75          restartPolicy: Always
+   76          terminationGracePeriodSeconds: 30
+   77          volumes:
+   78          - name: gogs-data
+   79            persistentVolumeClaim:
+   80              claimName: gogs-data
+   81          - name: gogs-config
+   82            configMap:
+   83              name: gogs-config
+   84              items:
+   85                - key: app.ini
+   86                  path: app.ini
+   87      test: false
+   88      triggers:
+   89      - type: ConfigChange
+   90      - imageChangeParams:
+   91          automatic: true
+   92          containerNames:
+   93          - ${APPLICATION_NAME}
+   94          from:
+   95            kind: ImageStreamTag
+   96            name: ${GOGS_IMAGE}
+   97            namespace: openshift
+   98        type: ImageChange
+   99  - kind: PersistentVolumeClaim
+  100    apiVersion: v1
+  101    metadata:
+  102      name: gogs-data
+  103    spec:
+  104      accessModes:
+  105        - ReadWriteOnce
+  106      resources:
+  107        requests:
+  108          storage: ${GOGS_VOLUME_CAPACITY}
+  109  - kind: ConfigMap
+  110    apiVersion: v1
+  111    metadata:
+  112      name: gogs-config
+  113    data:
+  114      app.ini: |
+  115        APP_NAME = Gogs
+  116        RUN_MODE = prod
+  117        RUN_USER = gogs
+  118        [database]
+  119        DB_TYPE  = postgres
+  120        HOST     = postgresql:5432
+  121        NAME     = ${DATABASE_NAME}
+  122        USER     = ${DATABASE_USER}
+  123        PASSWD   = ${DATABASE_PASSWORD}
+  124        SSL_MODE = disable
+  125        [repository]
+  126        ROOT = /data/repositories
+  127        [server]
+  128        ROOT_URL=http://${GOGS_ROUTE}
+  129        [security]
+  130        INSTALL_LOCK = true
+  131        [mailer]
+  132        ENABLED = false
+  133        [service]
+  134        ENABLE_CAPTCHA = false
+  135        REGISTER_EMAIL_CONFIRM = false
+  136        ENABLE_NOTIFY_MAIL     = false
+  137        DISABLE_REGISTRATION   = false
+  138        REQUIRE_SIGNIN_VIEW    = false
+  139        [picture]
+  140        DISABLE_GRAVATAR        = false
+  141        ENABLE_FEDERATED_AVATAR = true
+  142        [webhook]
+  143        SKIP_TLS_VERIFY = true
+  144  parameters:
+  145  - name: APPLICATION_NAME
+  146    description: The name for the application.
+  147    required: true
+  148    value: gogs
+  149  - name: GOGS_ROUTE
+  150    description: The route for the Gogs Application
+  151    required: true
+  152  - name: GOGS_VOLUME_CAPACITY
+  153    description: Volume space available for data, e.g. 512Mi, 2Gi
+  154    required: true
+  155    value: 4Gi
+  156  - name: DATABASE_USER
+  157    displayName: Database Username
+  158    required: true
+  159    value: gogs
+  160  - name: DATABASE_PASSWORD
+  161    displayName: Database Password
+  162    required: true
+  163    value: gogs
+  164  - name: DATABASE_NAME
+  165    displayName: Database Name
+  166    required: true
+  167    value: gogs
+  168  - name: GOGS_IMAGE
+  169    displayName: Gogs Image and tag
+  170    required: true
+  171    value: gogs:latest' > $HOME/gogs.yaml
+  172  oc process -f $HOME/gogs.yaml --param GOGS_ROUTE=gogs-cicd.apps.00d0.example.opentlc.com|oc create -f -
+  173  oc get pods
+  174  watch oc get pods
+  175  oc delete dc gogs
+  176  vi repository/nexusimport.sh 
+  177  oc new-app wkulhanek/gogs:11.34 -lapp=gogs
+  178  oc get pods
+  179  oc delete dc gogs
+  180  oc delete svc gogs
+  181  oc delete route gogs
+  182  oc delete rc gogs
+  183  oc delete pvc gogs-data 
+  184  oc new-app wkulhanek/gogs:11.34 -lapp=gogs
+  185  watch oc get gogs
+  186  watch oc get pods
+  187  echo "apiVersion: v1
+  188  kind: PersistentVolumeClaim
+  189  metadata:
+  190    name: gogs-data
+  191  spec:
+  192    accessModes:
+  193    - ReadWriteOnce
+  194    resources:
+  195      requests:
+  196        storage: 4Gi" | oc create -f -
+  197  oc get routes
+  198  oc expose gogs
+  199  oc expose svc gogs
+  200  oc get routes
+  201  vi gogs.yaml 
+  202  git clone https://github.com/wkulhanek/openshift-tasks.git
+  203  ls
+  204  rm -rf openshift-tasks
+  205  git clone https://github.com/wkulhanek/openshift-tasks.git
+  206  cd $HOME/openshift-tasks
+  207  git remote add gogs http://gogs-cicd.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  208  git push -u gogs master
+  209  oc get projects
+  210  oc project jdeenada-pipeline-tasks-dev
+  211  oc new-app eap70-basic-s2i --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  212  oc get pods
+  213  oc get bc
+  214  oc delete bc tasks 
+  215  oc get dc
+  216  oc delete dc tasks
+  217  oc get svc
+  218  oc delete svc tasks
+  219  oc delete svc tasks-ping 
+  220  oc get routes
+  221  oc delete route tasks
+  222  oc get rc
+  223  clear
+  224  oc new-app eap70-basic-s2i --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  225  oc get pods
+  226  oc delete bc tasks 
+  227  oc delete dc tasks 
+  228  oc delete svc tasks 
+  229  oc delete route tasks 
+  230  oc get is
+  231  oc delete is tasks
+  232  oc new-app eap70-basic-s2i --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  233  oc delete bc tasks 
+  234  oc delete dc tasks 
+  235  oc delete is tasks
+  236  oc delete svc tasks 
+  237  oc delete route tasks 
+  238  oc delete svc tasks-ping 
+  239  oc new-app eap70-basic-s2i --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  240  watch oc get pods
+  241  oc logs -f tasks-1-build
+  242  docker image list
+  243  history
+  244  oc delete bc tasks 
+  245  delete dc tasks 
+  246  oc delete is tasks
+  247  oc delete svc tasks 
+  248  oc delete route tasks 
+  249  oc delete svc tasks-ping 
+  250  oc status
+  251  oc new-app registry.access.redhat.com/jboss-eap-7/eap70-openshift --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  252  watch oc get pods
+  253  oc expose svc/eap70-openshift
+  254  oc get routes
+  255  cd
+  256  oc get pods
+  257  oc get bc
+  258  oc delete pod eap70-openshift-1-gh6kk
+  259  oc new-app eap70-basic-s2i --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  260  oc delete bc tasks 
+  261  delete dc tasks 
+  262  oc delete is tasks
+  263  oc delete svc tasks 
+  264  oc delete route tasks 
+  265  oc delete svc tasks-ping
+  266  oc new-app eap70-basic-s2i --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  267  oc delete bc tasks 
+  268  delete dc tasks 
+  269  oc delete is tasks
+  270  oc delete svc tasks 
+  271  oc delete route tasks 
+  272  oc delete svc tasks-ping
+  273  oc get dc
+  274  oc delete dc
+  275  oc delete dc tasks 
+  276  oc get pods
+  277  oc delete pod openshift-tasks-1-build
+  278  oc get pods
+  279  oc new-app eap70-basic-s2i --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  280  oc logs -f bc/tasks
+  281  oc get bc
+  282  oc edit bc tasks 
+  283  docker
+  284  oc image list
+  285  oc get image
+  286  oc get image |grep openshift
+  287  oc edit bc tasks 
+  288  oc get image |grep eap70-openshift
+  289  oc edit bc tasks 
+  290  oc logs -f bc/tasks
+  291  oc get dc
+  292  oc get pods
+  293  oc delete pod tasks-1-build
+  294  oc get pods
+  295  oc new-app eap70-basic-s2i --param MAVEN_MIRROR_URL=http://nexus3.cicd.svc.cluster.local:8081/repository/offline --param SOURCE_REPOSITORY_URL=http://gogs.cicd.svc.cluster.local:3000/CICDLabs/openshift-tasks --param SOURCE_REPOSITORY_REF=master --param CONTEXT_DIR= --param APPLICATION_NAME=tasks
+  296  oc get pods
+  297  oc get dc
+  298  oc edit dc tasks 
+  299  oc get bc
+  300  oc start-build tasks 
+  301  oc get pods
+  302  oc logs -f bc/tasks
+  303  oc logs -f bc/tasks-2
+  304  oc edit bc tasks
+  305  oc start-build tasks 
+  306  oc logs -f bc/tasks
+  307  oc import-image bastion.00d0.example.opentlc.com:5000/jboss-eap-7/eap70-openshift@sha256:a6b7475638629f354a3e845c41db1e80764a688df90febf7d1f906dcb204cf68
+  308  oc import-image eap70-openshift:latest
+  309  RHT_TAG='latest'
+  310  LOCAL_TAG='v3.9.14'
+  311  IMAGES_LATEST_TO_PATCH="ose-recycler prometheus-node-exporter"
+  312  time for image in ${IMAGES_LATEST_TO_PATCH}; do   latest_version=`skopeo inspect --tls-verify=false docker://registry.access.redhat.com/openshift3/$image | jq ".RepoTags | map(select(startswith((\"${RHT_TAG}\")))) |.[] "| sort -V | tail -1 | tr -d '"'`;   if [[ "$latest_version" == "" ]]; then latest_version='latest';fi;   echo "Copying image: $image version: $latest_version";   skopeo copy --dest-tls-verify=false docker://registry.access.redhat.com/openshift3/${image}:${latest_version} docker://localhost:5000/openshift3/${image}:${LOCAL_TAG} & done
+  313  ssh master1.00d0.internal
+  314  oc get nodes
+  315  oc get bc
+  316  oc get is
+  317  oc tag openshift-tasks:latest openshift-tasks:testready -n jdeenada-pipeline-tasks-dev
+  318  oc tag openshift-tasks:testready openshift-tasks:prodready -n jdeenada-pipeline-tasks-dev
+  319  oc get is
+  320  oc status
+  321  oc new-app jdeenada-pipeline-tasks-dev/openshift-tasks:testready --name=openshift-tasks -n jdeenada-pipeline-tasks-test
+  322  oc get pods
+  323  oc project jdeenada-pipeline-tasks-test
+  324  oc get pods
+  325  oc get svc
+  326  oc expose svc openshift-tasks
+  327  oc get routes
+  328  oc new-app jdeenada-pipeline-tasks-dev/openshift-tasks:testready --name=openshift-tasks -n jdeenada-pipeline-tasks-prod
+  329  oc project jdeenada-pipeline-tasks-prod
+  330  oc get pods
+  331  oc expose svc openshift-tasks
+  332  oc get routes
+  333  oc project jdeenada-pipeline-tasks-dev
+  334  oc get pods
+  335  oc delete pods openshift-tasks-3-build
+  336  oc delete pods openshift-tasks-2-build
+  337  oc delete pods openshift-tasks-1-build
+  338  history
+  339  oc get is
+  340  oc new-app openshift-tasks
+  341  oc new-app openshift-tasks:latest
+  342  oc get svc
+  343  oc delete svc openshift-tasks 
+  344  oc delete route openshift-tasks 
+  345  oc get bc
+  346  oc delete openshift-tasks
+  347  oc delete bc openshift-tasks
+  348  ls
+  349  clear
+  350  oc new-app openshift-tasks:latest
+  351  watch oc get pods
+  352  oc expose svc openshift-tasks 
+  353  oc get bc
+  354  oc start-build openshift-tasks
+  355  oc status
+  356  oc new-app openshift-tasks:latest
+  357  oc delete svc openshift-tasks 
+  358  oc delete route openshift-tasks 
+  359  ic get i
+  360  ic get is
+  361  oc get is
+  362  oc new-app openshift-tasks:latest
+  363  oc get pods
+  364  oc expose svc/openshift-tasks
+  365  oc get projects
+  366  oc project jdeenada-pipeline-tasks-test
+  367  oc get pods
+  368  oc get svc
+  369  oc delete svc openshift-tasks 
+  370  oc delete route openshift-tasks 
+  371  oc new-app  openshift-tasks:latest
+  372  oc new-app jdeenada-pipeline-tasks-test/openshift-tasks:testready
+  373  oc expose svc/openshift-tasks
+  374  oc project jdeenada-pipeline-tasks-prod
+  375  oc delete svc openshift-tasks 
+  376  oc delete route openshift-tasks
+  377  oc new-app jdeenada-pipeline-tasks-test/openshift-tasks:prodready
+  378  oc new-app jdeenada-pipeline-tasks-test/openshift-tasks:testready
+  379  oc expose svc/openshift-tasks
+  380  oc statud
+  381  oc status
+  382  oc project jdeenada-pipeline-tasks-dev
+  383  vim testpipe.yaml
+  384  oc create -f testpipe.yaml 
+  385  vim testpipe.yaml
+  386  oc create -f testpipe.yaml 
+  387  vim testpipe.yaml
+  388  oc create -f testpipe.yaml 
+  389  vim testpipe.yaml
+  390  oc create -f testpipe.yaml 
+  391  history
+  392  oc create -f testpipe.yaml 
+  393  l
+  394  ls
+  395  oc start-build openshift-tasks
+  396  oc status
+  397  ssh master1.00d0.internal 
+  398  oc start-build --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-cicd.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  399  oc start-build openshift-tasks tasks
+  400  oc get bc
+  401  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-cicd.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  402  oc delete svc openshift-tasks 
+  403  oc delete bc openshift-tasks 
+  404  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-cicd.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  405  oc delete bc openshift-tasks 
+  406  oc delete svc openshift-tasks 
+  407  oc delete dc openshift-tasks 
+  408  clear
+  409  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-cicd.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  410  oc get is
+  411  oc get bc
+  412  oc expose svc/openshift-tasks
+  413  oc delete route openshift-tasks 
+  414  oc expose svc/openshift-tasks
+  415  oc delete route openshift-tasks 
+  416  oc delete dc openshift-tasks 
+  417  oc delete svc openshift-tasks 
+  418  oc delete bc openshift-tasks 
+  419  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  420  oc logs -f bc/openshift-tasks
+  421  oc get pods
+  422  oc get bc
+  423  ls
+  424  vim secret.txt
+  425  rm ipa-ca.crt
+  426  rm testpipe.yaml 
+  427  rm openshift-tasks
+  428  rm -f openshift-tasks
+  429  rm -rf openshift-tasks
+  430  history
+  431  vim limits.yaml
+  432  oc create -f limits.yaml -n jdeenada-pipeline-tasks-dev
+  433  oc autoscale dc/openshift-tasks --min 1 --max 5 --cpu-percent=80
+  434  oc get hpa
+  435  clear
+  436  oc get hpa
+  437  oc get nodes
+  438  clear
+  439  oc get nodes
+  440  oc get projects
+  441  ROUTE=$(oc get route hello-openshift --template "{{ .spec.host }}")
+  442  for time in {1..15000};   do    echo time $time;    curl ${ROUTE};   done
+  443  ROUTE=$(oc get route openshift-tasks --template "{{ .spec.host }}")
+  444  for time in {1..15000};   do    echo time $time;    curl ${ROUTE};   done
+  445  oc get routes
+  446  oc get svc
+  447  oc expose svc openshift-tasks
+  448  ROUTE=$(oc get route openshift-tasks --template "{{ .spec.host }}")
+  449  for time in {1..15000};   do    echo time $time;    curl ${ROUTE};   done
+  450  for time in {1..15000};   do    echo time $time;    curl http://openshift-tasks-jdeenada-pipeline-tasks-dev.apps.00d0.example.opentlc.com/;   done
+  451  oc get projects
+  452  oc delete project jdeenada-gogs
+  453  oc delete project jdeenada-sonarqube
+  454  oc get projects
+  455  ls
+  456  vi secret.txt 
+  457  git clone https://github.com/wkulhanek/openshift-tasks.git
+  458  cd $HOME/openshift-tasks
+  459  git remote add gogs http://gogs-cicd.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  460  git push -u gogs master
+  461  git remote add gogs http://gogs-cicd.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  462  git push -u gogs master
+  463  git remote add gogs http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  464  git push -u gogs master
+  465  clear
+  466  cd
+  467  oc get project
+  468  oc get project --show-label
+  469  oc get project
+  470  ls
+  471  cat pipeline.yaml 
+  472  ls
+  473  > pipeline.yaml 
+  474  vim pipeline.yaml
+  475  oc create -f pipeline.yaml 
+  476  oc get pods
+  477  oc delete pod openshift-tasks-1-build
+  478  oc delete pod openshift-tasks-2-build
+  479  oc delete pod openshift-tasks-3-build
+  480  oc delete pod openshift-tasks-4-build
+  481  oc delete pod openshift-tasks-5-build
+  482  oc get pods
+  483  oc get bc
+  484  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  485  oc delete bc openshift-tasks 
+  486  oc delete dc openshift-tasks
+  487  oc delete svc openshift-tasks 
+  488  oc delete route openshift-tasks 
+  489  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  490  oc logs -f bc/openshift-tasks
+  491  oc delete bc openshift-tasks 
+  492  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  493  oc delete svc openshift-tasks 
+  494  oc delete dc openshift-tasks
+  495  oc delete bc openshift-tasks 
+  496  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  497  oc logs -f bc/openshift-tasks
+  498  oc delete bc openshift-tasks 
+  499  oc delete dc openshift-tasks
+  500  oc delete svc openshift-tasks 
+  501  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-cicd.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  502  oc logs -f bc/openshift-tasks
+  503  oc delete svc openshift-tasks 
+  504  oc delete dc openshift-tasks
+  505  oc delete bc openshift-tasks 
+  506  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  507  oc logs -f bc/openshift-tasks
+  508  oc new-project jdeenada-gogs --display-name "Shared Gogs"
+  509  oc new-app postgresql-persistent --param POSTGRESQL_DATABASE=gogs --param POSTGRESQL_USER=gogs --param POSTGRESQL_PASSWORD=gogs --param VOLUME_CAPACITY=4Gi -lapp=postgresql_gogs
+  510  oc new-app wkulhanek/gogs:11.34 -lapp=gogs
+  511  oc get pods
+  512  echo "apiVersion: v1
+  513  kind: PersistentVolumeClaim
+  514  metadata:
+  515    name: gogs-data
+  516  spec:
+  517    accessModes:
+  518    - ReadWriteOnce
+  519    resources:
+  520      requests:
+  521        storage: 4Gi" | oc create -f -
+  522  oc set volume dc/gogs --add --overwrite --name=gogs-volume-1 --mount-path=/data/ --type persistentVolumeClaim --claim-name=gogs-data
+  523  oc expose svc gogs
+  524  oc get route gogs
+  525  oc exec $(oc get pod | grep "^gogs" | awk '{print $1}') -- cat /opt/gogs/custom/conf/app.ini >$HOME/app.ini
+  526  oc create configmap gogs --from-file=$HOME/app.ini
+  527  oc set volume dc/gogs --add --overwrite --name=config-volume -m /opt/gogs/custom/conf/ -t configmap --configmap-name=gogs
+  528  cd $HOME
+  529  git clone https://github.com/wkulhanek/openshift-tasks.git
+  530  cd $HOME/openshift-tasks
+  531  git remote add gogs http://jdeenada:jdeenada@$(oc get route gogs -n jdeenada-gogs --template='{{ .spec.host }}')/CICDLabs/openshift-tasks.git
+  532  git push -u gogs master
+  533  git remote add gogs http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  534  cd
+  535  rm -rf openshift-tasks
+  536  cd $HOME
+  537  git clone https://github.com/wkulhanek/openshift-tasks.git
+  538  cd $HOME/openshift-tasks
+  539  git remote add gogs http://<gogs_user>:<gogs_password>@$(oc get route gogs -n xyz-gogs --template='{{ .spec.host }}')/CICDLabs/openshift-tasks.git
+  540  git remote add gogs http://jdeenada:jdeenada@$(oc get route gogs -n jdeenada-gogs --template='{{ .spec.host }}')/CICDLabs/openshift-tasks.git
+  541  git push -u gogs master
+  542  vim nexus_settings.xml
+  543  git commit -m "Updated Settings" nexus_settings.xml nexus_openshift_settings.xml
+  544  git push gogs master
+  545  cd
+  546  oc get bc
+  547  oc get projects
+  548  oc project jdeenada-pipeline-tasks-dev
+  549  oc get bc
+  550  oc delete bc openshift-tasks 
+  551  oc delete dc openshift-tasks 
+  552  oc delete svc openshift-tasks 
+  553  oc delete route openshift-tasks 
+  554  history
+  555  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  556  oc logs -f bc/openshift-tasks
+  557  oc get pods
+  558  oc get svc
+  559  oc expose svc openshift-tasks 
+  560  oc get limits
+  561  oc delete limits limits 
+  562  clear
+  563  oc get bc
+  564  oc delete bc openshift-tasks 
+  565  oc delete dc openshift-tasks 
+  566  oc delete svc openshift-tasks 
+  567  oc delete route openshift-tasks 
+  568  oc new-app --docker-image=registry.access.redhat.com/jboss-eap-7/eap70-openshift~http://gogs-jdeenada-gogs.apps.00d0.example.opentlc.com/CICDLabs/openshift-tasks.git
+  569  oc logs -f bc/openshift-tasks
+  570  ls
+  571  vim hpa.yaml
+  572  cat secret.txt 
+  573  ls
+  574  rm openshift-tasks-repository.zip 
+  575  oc create -f hpa.yaml 
+  576  oc get limits.yaml 
+  577  oc get limits
+  578  ll
+  579  cat README.md
+  580  git add .
+  581  git commit -m "homework"
+  582  git push origin ocp-hw
+  583  git push origin jaideena
+  584  git push origin https://github.com/jaideena/ocp-hw
+  585  git push origin jaideena/ocp-hw
+  586  clear
+  587  ls
+  588  oc autoscale dc/hello-openshift --min 1 --max 5 --cpu-percent=80
+  589  oc autoscale dc/openshift-tasks --min 1 --max 5 --cpu-percent=80
+  590  oc get hpa
+  591  oc new-project alpha
+  592  oc new-project beta
+  593  oc new-project common
+  594  grep -i amy htpasswd.openshift 
+  595  oc edit project alpha 
+  596  oc delete project alpha
+  597  oc delete project beta
+  598  oc new-project alpha --display-name=Alpha Corp
+  599  oc new-project alpha --display-name="Alpha Corp"
+  600  oc get projects
+  601  oc new-project beta --display-name="Beta Corp"
+  602  oc delete project common 
+  603  oc new-project common --display-name="Common"
+  604  htpasswd htpasswd.openshift amy
+  605  cat htpasswd.openshift 
+  606  htpasswd -D htpasswd.openshift amy
+  607  cat htpasswd.openshift 
+  608  htpasswd htpasswd.openshift amy
+  609  ssh master1.00d0.internal 
+  610  vi inventory 
+  611  vim inventory 
+  612  ls
+  613  scp htpasswd.openshift root@master1.00d0.internal:/var/tmp
+  614  ll
+  615  vim htpasswd.openshift 
+  616  ls
+  617  oc get nodes --show-labels
+  618  oc get projects
+  619  oc edit project alpha 
+  620  oc create project test node-selector=node1.00d0.internal
+  621  oc adm create project test node-selector=node1.00d0.internal
+  622  oc edit project alpha oc adm new-project myproject --node-selector='type=user-node,
+  623  oc adm create project test --node-selector=node1.00d0.internal
+  624  oc adm new-project testing --node-selector='hostname=node1.00d0.internal'
+  625  oc get projects
+  626  oc get projects -show-labels
+  627  oc edit project testing 
+  628  oc get projects
+  629  oc get svc
+  630  oc get project testing --show-labels
+  631  oc edit project testing
+  632  oc get project testing -o yaml
+  633  oc edit project alpha 
+  634  oc project alpha 
+  635  oc edit project alpha 
+  636  oc get projects
+  637  oc delete project alpha 
+  638  oc delete project beta 
+  639  oc adm new-project alpha --node-selector='hostname=node1.00d0.internal'
+  640  oc adm new-project beta --node-selector='hostname=node2.00d0.internal'
+  641  oc adm new-project common --node-selector='hostname=node3.00d0.internal'
+  642  oc delete project common 
+  643  oc adm new-project common --node-selector='hostname=node3.00d0.internal'
+  644  oc get projects
+  645  oc get nodes
+  646  oc get projects
+  647  oc project alpha 
+  648  oc edit project alpha 
+  649  oc delete project alpha
+  650  oc delete project beta
+  651  oc delete project common
+  652  oc adm new-project project Alpha --node-selector='hostname=node1.00d0.internal' --display-name='Alpha Corp'
+  653  oc adm new-project Alpha --node-selector='hostname=node1.00d0.internal' --display-name='Alpha Corp'
+  654  oc adm new-project Alpha --node-selector='hostname=node1.00d0.internal'
+  655  history
+  656  oc get projects
+  657  oc delete project testing
+  658   oc adm new-project Alpha --node-selector='hostname='node1.00d0.internal'
+  659   oc adm new-project Alpha --node-selector='hostname=node1.00d0.internal'
+  660   oc adm new-project alpha --node-selector='hostname=node1.00d0.internal' --display-name='Alpha Corp'
+  661   oc adm new-project beta --node-selector='hostname=node2.00d0.internal' --display-name='Beta Corp'
+  662   oc adm new-project common --node-selector='hostname=node3.00d0.internal' --display-name='Common Customers'
+  663  oc get projects
+  664  ssh master2.00d0.internal 
+  665  cat htpasswd.openshift 
+  666  ansible -m copy -a 
+  667  ansible all -m copy -a 
+  668  ansible all -m copy 
+  669  ansible all -m copy src=/root/htpasswd.openshift dest=/root/
+  670  ansible all -m copy -a "src=/root/htpasswd.openshift dest=/root/"
+  671  ssh master2.00d0.internal 
+  672  ssh master3.00d0.internal 
+  673  ssh master2.00d0.internal 
+  674  ssh master1.00d0.internal 
+  675  oc get users
+  676  oadm policy add-role-to-user basic-users amy -n alpha
+  677  oc adm policy add-role-to-user basic-users andrew alpha
+  678  oc adm policy add-role-to-user basic-users andrew -n alpha
+  679  oc adm policy add-role-to-user basic-users brian -n beta
+  680  oc adm policy add-role-to-user basic-users betty -n beta
+  681  oc project alpha
+  682  oc get user
+  683  oc project beta
+  684  oc get user -n beta
+  685  oc adm policy delete-role-to-user basic-users betty -n alpha
+  686  oc login -u amy
+  687  oc login -u system:admin
+  688  oc adm policy remove-role-to-user basic-users betty -n alpha
+  689  oc adm policy remove-role-from-user basic-users betty -n alpha
+  690  history
+  691  oc project alpha 
+  692  oc adm policy add-role-to-user basic-users amy -n alpha
+  693  oc adm policy add-role-to-user basic-users andrew -n alpha
+  694  oc project beta
+  695  oc adm policy add-role-to-user basic-users brian -n beta
+  696  oc adm policy add-role-to-user basic-users betty -n beta
+  697  oc login -u amy
+  698  oc project beta
+  699  oc project alpha
+  700  oc login -u system:admin
+  701  oc policy add-role-to-user admin amy -n alpha
+  702  oc policy add-role-to-user admin andrew -n alpha
+  703  oc login -u amy
+  704  oc project beta
+  705  oc login -u system:admin
+  706  oc policy add-role-to-user admin betty -n beta
+  707  oc policy add-role-to-user admin brian -n beta
+  708  clear
+  709  oc login -u brian
+  710  oc login -u system:admin
+  711  ls
+  712  cat secret.txt 
+  713  rm secret.txt 
+  714  clear
+  715  ls
+  716  mv anaconda-ks.cfg original-ks.cfg /var/tmp
+  717  ls
+  718  cat app.ini 
+  719  q!
+  720  clear
+  721  ls
+  722  git commit -a "adding files"
+  723  git commit -c "adding files"
+  724  git commit -m "adding files"
+  725  git remote add origin https://github.com/jaideena/ocp-hw.git
+  726  git remote -v
+  727  git push origin master
+  728  ls -a
+  729  ls
+  730  mkdir assignment
+  731  mv * assignment/
+  732  ls
+  733  cd assignment/
+  734  ll
+  735  cd repository/
+  736  ls
+  737  clear
+  738  ansible all -m ping
+  739  ls
+  740  cd assignment/
+  741  cat limits.yaml 
+  742  ssh master1.00d0.internal 
+  743  ls
+  744  cd assignment/
+  745  ls
+  746  vim limits.yaml 
+  747  oc get project --show-labels
+  748  oc get projects
+  749  oc get users
+  750  ssh master1.00d0.internal 
+  751  ssh master2.00d0.internal 
+  752  ssh master1.00d0.internal 
+  753  ssh master2.00d0.internal 
+  754  ssh master3.00d0.internal 
+  755  oc get limits -n alpha
+  756  oc get limits
+  757  cd assignment/
+  758  ls
+  759  oc get projects
+  760  oc project jdeenada-pipeline-tasks-dev
+  761  ls
+  762   oc get pods
+  763  oc create -f limits.yaml -n jdeenada-pipeline-tasks-dev
+  764  oc get limits
+  765  clear
+  766  oc get users
+  767  oc describe user amy 
+  768  oc edit user amy
+  769  oc whoami
+  770  oc get users
+  771  oc export user amy -o json
+  772  oc export user -o json
+  773  oc get limits
+  774  oc export limits
+  775  oc export user amy -o json
+  776  cd assignment/
+  777  vim limits.yaml 
+  778  oc get all
+  779  oc get project
+  780  oc export project alpha -o json
+  781  oc export all -o json
+  782  oc export all -o json > project.json
+  783  vim project.json 
+  784  oc process -f project.json 
+  785  oc create -f project.json 
+  786  ssh master2.00d0.internal 
+  787  ssh master3.00d0.internal 
+  788  oadm create-bootstrap-project-template -o yaml 
+  789  ssh master1.00d0.internal 
+  790  vim gamma_template
+  791  ls
+  792  mv gamma_template tester_template.yaml
+  793  clear
+  794  oc create -f tester_template.yaml 
+  795  vim tester_template.yaml
+  796  oc create -f tester_template.yaml 
+  797  vim tester_template.yaml
+  798  oc create -f tester_template.yaml 
+  799  vim tester_template.yaml
+  800  oc create -f tester_template.yaml 
+  801  vim tester_template.yaml
+  802  oc create -f tester_template.yaml 
+  803  vim tester_template.yaml
+  804  oc create -f tester_template.yaml 
+  805  vim tester_template.yaml
+  806  oc create -f tester_template.yaml 
+  807  oc process -f tester_template.yaml 
+  808  oc process -f tester_template.yaml | oc create -f 
+  809  oc process -f tester_template.yaml | oc create -f -
+  810  vim tester_template.yaml
+  811  ls
+  812  mv tester_template.yaml tester-project
+  813  vim tester-project 
+  814  oc process -f tester-project -v PROJECT_NAME=testerrojectname,PROJECT_DISPLAYNAME=testerDisplayname,PROJECT_DESCRIPTION=tester_description,PROJECT_ADMIN_USER=gamma,PROJECT_REQUESTING_USER=gamma | oc create -f -
+  815  oc process -f tester-project -p PROJECT_NAME=testerrojectname PROJECT_DISPLAYNAME=testerDisplayname PROJECT_DESCRIPTION=tester_description PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  816  oc whoami
+  817  oc get projects
+  818  oc delete project testerrojectname 
+  819  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma,alpha PROJECT_REQUESTING_USER=gamma,alpha | oc create -f -
+  820  cat tester-project 
+  821  oc get limits
+  822  oc export  limits limits -o yaml
+  823  oc get rq
+  824  oc get quota
+  825  oc get projects
+  826  oc delete project tester 
+  827  ls
+  828  cp tester-project tester-project-v1
+  829  > tester-project
+  830  vim tester-project
+  831  oc process -f tester-project
+  832  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma,alpha PROJECT_REQUESTING_USER=gamma,amy | oc create -f -
+  833  oc logi -u gamma
+  834  oc login -u gamma
+  835  oc get projects
+  836  oc login -u system:admin
+  837  oc project tester
+  838  oc get limits
+  839  oc get limit
+  840  oc get users
+  841  oc delete project tester 
+  842  vim tester-project
+  843  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma,alpha PROJECT_REQUESTING_USER=gamma,amy | oc create -f -
+  844  oc status
+  845  oc project default
+  846  oc get projects
+  847  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma,alpha PROJECT_REQUESTING_USER=gamma,amy | oc create -f -
+  848  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  849  oc delete project tester 
+  850  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  851  oc get quota
+  852  > tester-project
+  853  vim tester-project
+  854  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  855  oc delete project tester 
+  856  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  857  oc get quota -n tester
+  858  oc get projects
+  859  oc get quota -n default
+  860  oc describe quota tester-project -n default
+  861  oc delete quota tester-project -n default
+  862  oc status
+  863  vim tester-project
+  864  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  865  oc delete project tester 
+  866  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  867  oc delete project tester 
+  868  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  869  oc delete project tester 
+  870  vim tester-project
+  871  oc delete project tester 
+  872  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  873  oc get limits
+  874  oc get projects
+  875  oc get limits -n jdeenada-pipeline-tasks-dev
+  876  oc describe limit 32f11514-993d-11e8-b762-02c58fbe8c16
+  877  oc describe limits 32f11514-993d-11e8-b762-02c58fbe8c16
+  878  oc describe limits limits
+  879  oc describe limits limits -n jdeenada-pipeline-tasks-dev
+  880  oc describe limits 32f11514-993d-11e8-b762-02c58fbe8c16 -n jdeenada-pipeline-tasks-dev
+  881  oc delete limits 32f11514-993d-11e8-b762-02c58fbe8c16 -n jdeenada-pipeline-tasks-dev
+  882  oc get limits
+  883  oc delete limits all
+  884  oc delete limits 1fac8676-993f-11e8-b762-02c58fbe8c16
+  885  oc delete limits 3a30ed3a-993f-11e8-b762-02c58fbe8c16
+  886  oc delete limits 3f533fd5-993e-11e8-b762-02c58fbe8c16
+  887  oc delete limits 7891fe46-993e-11e8-b762-02c58fbe8c16
+  888  oc delete limits 84eb854c-993e-11e8-b762-02c58fbe8c16
+  889  oc delete limits a400583f-9940-11e8-b762-02c58fbe8c16
+  890  oc delete limits b30b7da6-9940-11e8-b762-02c58fbe8c16
+  891  oc delete limits bd24ea24-9940-11e8-b762-02c58fbe8c16
+  892  oc delete limits e6a8a508-9941-11e8-b762-02c58fbe8c16
+  893  oc get limits
+  894  cd assignment
+  895  oc get limits limits -n jdeenada-pipeline-tasks-dev -o yaml
+  896  cd
+  897  vim tester-project
+  898  cp tester-project tester-project-v2
+  899  > tester-project
+  900  vim tester-project
+  901  oc get projects
+  902  oc get quota -n tester
+  903  oc delete quota tester-project -n tester
+  904  oc delete project tester
+  905  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma PROJECT_REQUESTING_USER=gamma | oc create -f -
+  906  oc get quota -n tester
+  907  oc delete quota tester-quota -n tester
+  908  oc get limits -n tester
+  909  oc delete limits tester-limits -n tester
+  910  oc get limits
+  911  oc delete project tester 
+  912  oc get projects
+  913  oc process -f tester-project -p PROJECT_NAME=tester PROJECT_DISPLAYNAME=tester PROJECT_DESCRIPTION=tester_client PROJECT_ADMIN_USER=gamma,amy PROJECT_REQUESTING_USER=gamma,amy | oc create -f -
+  914  oc delete limits tester-limits -n tester
+  915  oc delete quota tester-quota -n tester
+  916  oc delete project tester 
+  917  oc get templates -n openshift
+  918  oc get users
+  919  oc get users -o yaml
+  920  oc export users -o yaml
+  921  vim user-create
+  922  ssh master2.00d0.internal 
+  923  ssh master3.00d0.internal 
+  924  ls
+  925  rm tester-project-v1 tester-project-v2
+  926  ls
+  927  vim user-create
+  928  kill 4325
+  929  vim user-create
+  930  oc process -f user-create 
+  931  vim user-create
+  932  oc process -f user-create 
+  933  oc create -f user-create
+  934  oc get users
+  935  ssh master1.00d0.internal 
+  936  vim user-create
+  937  oc create user john
+  938  oc get users
+  939  oc create useridentitymapping john
+  940  oc create useridentitymapping 
+  941  oc create useridentitymapping user john
+  942  oc create useridentitymapping john
+  943  oc create useridentitymapping john redhat
+  944  oc get users
+  945  oc create -f user-create 
+  946  oc get template
+  947  oc delete template user-create 
+  948  oc create useridentitymapping htpasswd_auth:john john
+  949  ssh master1.00d0.internal 
+  950  oc get identity 
+  951  oc get users
+  952  vim useradd
+  953  oc process -f useradd -p username=james |oc create -f -
+  954  oc login -u james
+  955  oc get users
+  956  oc login -u james
+  957  ls
+  958  rm user-create 
+  959  ls
+  960  cat useradd 
+  961  oc get users
+  962  oc process -f useradd -p username=jayaraj |oc create -f -
+  963  oc get users
+  964  ls
+  965  vim tester-project 
+  966  vi pre-check.yml
+  967  ansible-playbook
+  968  vi /etc/ansible/hosts 
+  969  hostname
+  970  vi /etc/ansible/hosts 
+  971  ls
+  972  ansible-playbook -C pre-check.yml 
+  973  vim pre-check.yml 
+  974  ansible-playbook -C pre-check.yml 
+  975  vim pre-check.yml 
+  976  ansible-playbook -C pre-check.yml 
+  977  vim pre-check.yml 
+  978  ansible-playbook -C pre-check.yml 
+  979  vim pre-check.yml 
+  980  > pre-check.
+  981  > pre-check.yml 
+  982  rm pre-check.
+  983  rm pre-check.retry 
+  984  ls
+  985  vim pre-check.yml 
+  986  ansible-playbook -C pre-check.yml 
+  987  vim pre-check.yml 
+  988  ansible-playbook -C pre-check.yml 
+  989  vim pre-check.yml 
+  990  ansible-playbook -C pre-check.yml 
+  991  vim pre-check.yml 
+  992  ansible-playbook -C pre-check.yml 
+  993  history
+  994  history > /var/tmp/history.backup
